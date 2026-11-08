@@ -1,0 +1,976 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Защита форта от зомби</title>
+<style>
+  :root{
+    --bg:#0b0e14;
+    --panel:#141a26;
+    --line:#2a364a;
+    --text:#e8eef7;
+    --muted:#8a97ad;
+    --accent:#ffb23e;
+    --danger:#e2453c;
+    --ok:#6fe39a;
+    --font:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{
+    height:100%;overflow:hidden;background:var(--bg);color:var(--text);
+    font-family:var(--font);user-select:none;-webkit-tap-highlight-color:transparent;
+  }
+  canvas{display:block;cursor:none}
+  #layer{position:fixed;inset:0;pointer-events:none;display:flex;flex-direction:column;z-index:10}
+  #hud{position:absolute;inset:0;pointer-events:none;z-index:20;padding:12px;display:flex;flex-direction:column;gap:10px}
+  #topbar{display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap}
+  .panel{
+    background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 14px;box-shadow:0 8px 30px rgba(0,0,0,.45);
+  }
+  .panel h2{font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;display:flex;align-items:center;gap:8px}
+  .bar-wrap{width:150px;height:10px;background:#0004;border-radius:5px;overflow:hidden;border:1px solid rgba(255,255,255,.12)}
+  .bar-fill{height:100%;width:100%;border-radius:5px;transition:width .25s ease,background-color .2s}
+  .hp .bar-fill{background:linear-gradient(90deg,#b3241d,#ff6a4a)}
+  .bs .bar-fill{background:linear-gradient(90deg,#2f7fd1,#7cc4ff)}
+  .stat{font:14px var(--font);color:var(--text)}
+  .stat b{color:var(--accent)}
+  #ammo{font:20px 'Segoe UI',monospace;color:var(--text);text-shadow:0 2px 6px #000}
+  #wave{margin-left:auto;font:16px var(--font);color:var(--muted);white-space:nowrap}
+  #cross{position:fixed;left:50%;top:50%;width:28px;height:28px;margin:-14px 0 0 -14px;pointer-events:none;z-index:25}
+  #cross::before,#cross::after{content:'';position:absolute;background:#fff;opacity:.9;box-shadow:0 0 6px #000}
+  #cross::before{left:13px;top:1px;width:2px;height:26px;clip-path:polygon(0 0,100% 0,100% 36%,0 36%,0 64%,100% 64%,100% 100%,0 100%)}
+  #cross::after{top:13px;left:1px;height:2px;width:26px;clip-path:polygon(0 0,36% 0,36% 100%,0 100%,64% 0,100% 0,100% 100%,64% 100%)}
+  #cross.hit::before,#cross.hit::after{background:var(--danger);box-shadow:0 0 10px var(--danger)}
+  #msg{position:fixed;left:50%;top:14%;transform:translateX(-50%);font:18px var(--font);color:#fff;text-shadow:0 2px 8px #000;pointer-events:none;z-index:30;opacity:0;transition:opacity .25s}
+  #msg.show{opacity:1}
+  #banner{position:fixed;left:0;right:0;top:26%;text-align:center;pointer-events:none;z-index:30;opacity:0}
+  #banner .big{font:bold 56px var(--font);color:var(--accent);text-shadow:0 3px 10px #000;letter-spacing:2px}
+  #banner .small{font:17px var(--font);color:var(--text);text-shadow:0 2px 8px #000}
+  #banner.show{animation:bn 2.6s ease-out both}
+  @keyframes bn{0%{opacity:0;transform:scale(1.35)}12%{opacity:1;transform:scale(1)}82%{opacity:1}100%{opacity:0}}
+  #combo{position:fixed;left:50%;top:42%;transform:translateX(-50%);text-align:center;pointer-events:none;z-index:30;display:none}
+  #combo b{font:bold 34px var(--font);color:var(--accent);text-shadow:0 2px 8px #000;display:inline-block}
+  #combo i{display:block;height:4px;width:120px;background:linear-gradient(90deg,transparent,var(--accent),transparent);margin:6px auto 0;border-radius:2px;transform-origin:center;transform:scaleX(1)}
+  .overlay{position:fixed;inset:0;z-index:100;display:none;align-items:center;justify-content:center;flex-direction:column;text-align:center;padding:16px;background:rgba(6,8,14,.85);backdrop-filter:blur(4px)}
+  .card{max-width:560px;width:100%;background:linear-gradient(170deg,#1d2536,#0e131f);border:1px solid var(--line);border-radius:14px;padding:26px 30px;box-shadow:0 25px 80px rgba(0,0,0,.6);text-align:left;position:relative;overflow:hidden}
+  .card.shop{max-width:920px;max-height:92vh;overflow-y:auto;display:flex;flex-direction:column}
+  .card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--accent),var(--danger))}
+  .card h1{font:30px var(--font);color:var(--text);margin-bottom:6px}
+  .card p{color:var(--muted);font-size:15px;line-height:1.55;margin-bottom:18px}
+  .row{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+  .btn{
+    background:var(--accent);color:#1a1202;border:none;border-radius:8px;padding:12px 26px;font:bold 16px var(--font);cursor:pointer;box-shadow:0 4px 0 #a8701c;transition:transform .1s,box-shadow .1s;display:inline-flex;align-items:center;gap:8px;white-space:nowrap
+  }
+  .btn:hover{transform:translateY(-2px);filter:brightness(1.15)}
+  .btn:active{transform:translateY(2px);box-shadow:0 1px 0 #a8701c}
+  .btn.ghost{background:transparent;color:var(--text);border:1px solid var(--line);box-shadow:none}
+  .btn.ghost:hover{background:rgba(255,255,255,.06)}
+  .hint{color:var(--muted);font-size:13px;line-height:1.6;margin-top:10px}
+  .hint b{color:var(--text)}
+  .shop-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-top:14px;max-height:52vh;overflow-y:auto;padding-right:6px}
+  .shop-grid::-webkit-scrollbar{width:6px}
+  .shop-grid::-webkit-scrollbar-thumb{background:#2a364a;border-radius:3px}
+  .shop-card{
+    background:#101620;border:1px solid var(--line);border-radius:10px;padding:12px 14px;cursor:pointer;display:flex;gap:10px;align-items:flex-start;transition:border-color .15s,transform .15s
+  }
+  .shop-card:hover{border-color:var(--accent);transform:translateY(-1px)}
+  .shop-card:disabled{opacity:.45;cursor:not-allowed}
+  .ico{font-size:24px}
+  .shop-info{flex:1;min-width:0}
+  .shop-info b{font:15px var(--font);color:var(--text);display:block}
+  .shop-info span{font-size:12.5px;color:var(--muted);line-height:1.4}
+  .price{font:bold 15px var(--font);color:var(--accent);white-space:nowrap}
+  .hotkeys{display:flex;gap:8px;justify-content:center;margin-top:10px;flex-wrap:wrap}
+  .hk{background:#1c2532;border:1px solid var(--line);color:var(--muted);border-radius:6px;padding:4px 10px;font-size:12px}
+  .hk.on{color:var(--accent);border-color:var(--accent)}
+  #pause p{color:var(--muted);font-size:15px;line-height:1.7;margin-bottom:16px}
+  #flash{position:fixed;inset:0;pointer-events:none;z-index:60;background:rgba(255,255,255,.14);opacity:0;transition:opacity .12s}
+  #hurt{position:fixed;inset:0;pointer-events:none;z-index:65;background:radial-gradient(circle at 50% 50%,transparent 30%,rgba(226,69,60,.6) 90%);opacity:0;transition:opacity .18s}
+  #grain{position:fixed;inset:-40%;pointer-events:none;z-index:70;opacity:.06;mix-blend-mode:overlay;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");animation:gr .4s steps(4) infinite}
+  @keyframes gr{25%{transform:translate(-4%,4%)}50%{transform:translate(4%,-3%)}75%{transform:translate(-3%,-4%)}}
+</style>
+</head>
+<body>
+
+<div id="layer">
+  <div id="flash"></div>
+  <div id="hurt"></div>
+  <div id="grain"></div>
+  <div id="hud">
+    <div id="topbar">
+      <div class="panel hp">
+        <h2><span>❤</span> ФОРТ</h2>
+        <div class="bar-wrap"><div class="bar-fill" id="hpFill"></div></div>
+        <div class="stat" id="hpText">100 / 100</div>
+      </div>
+      <div class="panel bs" style="width:150px">
+        <h2><span>🧱</span> СТЕНА</h2>
+        <div class="bar-wrap"><div class="bar-fill" id="bsFill"></div></div>
+        <div class="stat" id="bsText">100%</div>
+      </div>
+      <div class="panel" style="flex:1;min-width:150px">
+        <h2><span>🌊</span> ВОЛНА</h2>
+        <div class="stat" id="waveText">Волна 0</div>
+        <div class="stat" id="waveSub" style="font-size:12px;color:var(--muted)">живых: 0</div>
+      </div>
+      <div class="panel" style="min-width:150px">
+        <h2><span>💰</span> МОНЕТЫ</h2>
+        <div class="stat" id="cashText">0</div>
+      </div>
+      <div class="panel" style="min-width:150px">
+        <h2><span>🎯</span> СЧЁТ</h2>
+        <div class="stat" id="scoreText">0</div>
+      </div>
+      <div class="panel" style="min-width:170px">
+        <h2><span>🔫</span> БОЕПРИПАСЫ</h2>
+        <div class="stat" id="ammoText">10 / 10</div>
+        <div class="stat" id="ammoSub" style="font-size:11px;color:var(--muted)">R — перезарядка</div>
+      </div>
+    </div>
+    <div id="combo"><b id="comboText">КОМБО ×1</b><i id="comboBar"></i></div>
+  </div>
+  <div id="cross"></div>
+  <div id="msg"></div>
+  <div id="banner"><div class="big" id="bannerBig">ВОЛНА 1</div><div class="small" id="bannerSmall">Держи оборону</div></div>
+
+  <div class="overlay" id="menu">
+    <div class="card">
+      <h1>ЗАЩИТА ФОРТА ОТ ЗОМБИ</h1>
+      <p>Удержи форт от волн нежити. Стреляй мышью, пополняй обойму клавишей R, пауза — Esc. Между волнами открывается магазин.</p>
+      <div class="row">
+        <button class="btn" id="btnPlay">▶ ИГРАТЬ</button>
+        <button class="btn ghost" id="btnHow">Как играть</button>
+      </div>
+      <div class="hint">
+        <b>Управление:</b> мышь — прицел и стрельба · <b>ЛКМ</b> — огонь · <b>R</b> — перезарядка · <b>Esc</b> — пауза · <b>1–6</b> — покупка в магазине
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay" id="how">
+    <div class="card">
+      <h1>Как играть</h1>
+      <div class="row" style="flex-direction:column;gap:8px">
+        <div style="display:flex;gap:10px;align-items:flex-start"><span class="ico">🧟</span><div>Зомби идут слева направо к форту. Не дай им дойти до стены.</div></div>
+        <div style="display:flex;gap:10px;align-items:flex-start"><span class="ico">🔫</span><div>Прицеливайся мышью и жми ЛКМ, чтобы стрелять. Обойма — 10 патронов, перезарядка 2 сек (или R).</div></div>
+        <div style="display:flex;gap:10px;align-items:flex-start"><span class="ico">🟢</span><div>Обычный зелёный — HP 2, урон форту 5, награда 10 монет.</div></div>
+        <div style="display:flex;gap:10px;align-items:flex-start"><span class="ico">🟡</span><div>Быстрый жёлтый — HP 1, высокая скорость, урон форту 3, награда 15 монет.</div></div>
+        <div style="display:flex;gap:10px;align-items:flex-start"><span class="ico">🔴</span><div>Танк — большой, красный, HP 5, медленный, урон форту 15, награда 30 монет (от волны 3).</div></div>
+        <div style="display:flex;gap:10px;align-items:flex-start"><span class="ico">💣</span><div>Мины ставятся перед фортом и взрываются при контакте с зомби (AoE урон).</div></div>
+        <div style="display:flex;gap:10px;align-items:flex-start"><span class="ico">💰</span><div>За убитых зомби дают монеты. Трать их в магазине на ремонт форта, урон, обойму, турели и перки.</div></div>
+      </div>
+      <button class="btn ghost" id="btnBack">Назад</button>
+    </div>
+  </div>
+
+  <div class="overlay" id="shop">
+    <div class="card shop">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div>
+          <h1 id="shopTitle">Магазин</h1>
+          <p id="shopSub">Между волнами — укрепляй форт и прокачивай стрелка</p>
+        </div>
+        <div style="font:bold 18px var(--font);color:var(--accent)"><span id="shopCash">💰 0</span></div>
+      </div>
+      <div class="shop-grid" id="shopGrid"></div>
+      <div class="hotkeys" id="shopHotkeys"></div>
+      <div style="margin-top:14px;display:flex;justify-content:flex-end">
+        <button class="btn" id="shopNext">▶ Начать волну</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay" id="pause">
+    <div class="card" style="max-width:420px;text-align:center">
+      <h1>ПАУЗА</h1>
+      <p>Игра приостановлена. Нажми ещё раз Esc или кликни «Продолжить», чтобы вернуться в бой.</p>
+      <div class="row" style="justify-content:center;gap:10px">
+        <button class="btn" id="btnResume">▶ Продолжить</button>
+        <button class="btn ghost" id="btnRestart">Заново</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay" id="gameover">
+    <div class="card">
+      <h1 style="color:var(--danger)">ФОРТ ПАЛ</h1>
+      <p id="goStats">Ты продержался <b>0 волн</b> · убито зомби <b>0</b> · заработано <b>0 монет</b></p>
+      <button class="btn" id="btnGoAgain">▶ СЫГРАТЬ СНОВА</button>
+    </div>
+  </div>
+</div>
+
+<canvas id="game"></canvas>
+
+<script>
+/* ==========================================================================
+   ЗАЩИТА ФОРТА ОТ ЗОМБИ — один HTML-файл, Canvas 2D, без внешних ресурсов
+   ========================================================================== */
+'use strict';
+
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d', { alpha: false });
+
+/* ---------- DOM ---------- */
+const els = {
+  flash: document.getElementById('flash'),
+  hurt: document.getElementById('hurt'),
+  msg: document.getElementById('msg'),
+  banner: document.getElementById('banner'),
+  bannerBig: document.getElementById('bannerBig'),
+  bannerSmall: document.getElementById('bannerSmall'),
+  combo: document.getElementById('combo'),
+  comboText: document.getElementById('comboText'),
+  comboBar: document.getElementById('comboBar'),
+  hpFill: document.getElementById('hpFill'),
+  hpText: document.getElementById('hpText'),
+  bsFill: document.getElementById('bsFill'),
+  bsText: document.getElementById('bsText'),
+  waveText: document.getElementById('waveText'),
+  waveSub: document.getElementById('waveSub'),
+  cashText: document.getElementById('cashText'),
+  scoreText: document.getElementById('scoreText'),
+  ammoText: document.getElementById('ammoText'),
+  ammoSub: document.getElementById('ammoSub'),
+  cross: document.getElementById('cross'),
+  overlayMenu: document.getElementById('menu'),
+  overlayHow: document.getElementById('how'),
+  overlayShop: document.getElementById('shop'),
+  overlayPause: document.getElementById('pause'),
+  overlayGo: document.getElementById('gameover'),
+  btnPlay: document.getElementById('btnPlay'),
+  btnHow: document.getElementById('btnHow'),
+  btnBack: document.getElementById('btnBack'),
+  shopGrid: document.getElementById('shopGrid'),
+  shopTitle: document.getElementById('shopTitle'),
+  shopSub: document.getElementById('shopSub'),
+  shopCash: document.getElementById('shopCash'),
+  shopNext: document.getElementById('shopNext'),
+  shopHotkeys: document.getElementById('shopHotkeys'),
+  btnResume: document.getElementById('btnResume'),
+  btnRestart: document.getElementById('btnRestart'),
+  btnGoAgain: document.getElementById('btnGoAgain'),
+};
+
+/* ---------- константы ---------- */
+const Z_TYPE = {
+  normal: { key:'normal', name:'Обычный',   color:'#6fe39a', hp:2,  speed:1.6, dmg:5,  reward:10, size:14 },
+  fast:   { key:'fast',   name:'Быстрый',   color:'#ffe04d', hp:1,  speed:3.2, dmg:3,  reward:15, size:11 },
+  tank:   { key:'tank',   name:'Танк',      color:'#e2453c', hp:5,  speed:0.9, dmg:15, reward:30, size:20 },
+};
+
+const COST = {
+  repair: 50, dmg: 100, mag: 75, mine: 60, turret: 120, wall: 150,
+};
+const REPAIR_HP = 20;
+const MAG_ADD   = 5;
+const WALL_ADD  = 25;
+
+/* ---------- состояние ---------- */
+let width, height;
+let state = 'MENU';   // MENU | HOW | PLAY | SHOP | PAUSE | GAMEOVER
+let paused = false;
+let dtGlobal = 1/60;
+
+let money = 0;
+let score = 0;
+let kills = 0;
+let wave = 0;
+let waveZombiesLeft = 0;
+let wavePause = 0;
+let waveTimer = 0;
+
+let fortHP = 100;
+let fortMaxHP = 100;
+let wallHP = 100;
+let wallMaxHP = 100;
+
+let player = {
+  x: 0, y: 0, angle: 0,
+  damage: 1,
+  mag: 10, magMax: 10,
+  reloading: false, reloadTime: 0, reloadMax: 2,
+};
+
+let combo = 0, comboTimer = 0, comboMax = 0;
+
+let bullets = [], zombies = [], particles = [], mines = [], turrets = [], drops = [];
+
+let mouse = { x: 0, y: 0, down: false };
+let keys = {};
+let shake = 0;
+let hurtFlash = 0;
+let muzzleFlash = 0;
+
+let audioCtx = null;
+let audioEnabled = false;
+let musicOsc = null, musicGain = null;
+
+/* ---------- звук (Web Audio API) ---------- */
+function initAudio(){
+  try{
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if(Ctx) audioCtx = new Ctx();
+  }catch(e){ audioCtx = null; }
+}
+function resumeAudio(){
+  if(audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  audioEnabled = true;
+}
+function tone({type='sine', freq=440, dur=0.1, vol=0.1}){
+  if(!audioCtx || !audioEnabled) return;
+  const t = audioCtx.currentTime;
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.type = type;
+  o.frequency.setValueAtTime(freq, t);
+  o.frequency.exponentialRampToValueAtTime(Math.max(10, freq*0.5), t + dur);
+  g.gain.setValueAtTime(vol, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  o.connect(g); g.connect(audioCtx.destination);
+  o.start(t); o.stop(t + dur + 0.05);
+}
+function noiseBurst({dur=0.1, vol=0.1, type='sawtooth', freq=150}){
+  if(!audioCtx || !audioEnabled) return;
+  const t = audioCtx.currentTime;
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.type = type;
+  o.frequency.setValueAtTime(freq, t);
+  o.frequency.exponentialRampToValueAtTime(freq*0.4, t + dur);
+  g.gain.setValueAtTime(vol, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  o.connect(g); g.connect(audioCtx.destination);
+  o.start(t); o.stop(t + dur + 0.05);
+}
+function sShoot(){ tone({type:'square', freq:900, dur:0.06, vol:0.12}); noiseBurst({dur:0.05, vol:0.08, freq:600}); }
+function sHit(){ tone({type:'triangle', freq:220, dur:0.05, vol:0.1}); }
+function sDie(){ noiseBurst({dur:0.18, vol:0.15, freq:100}); tone({type:'sawtooth', freq:120, dur:0.12, vol:0.06}); }
+function sWallHit(){ tone({type:'square', freq:110, dur:0.12, vol:0.1}); }
+function sCoin(){ tone({type:'sine', freq:900, dur:0.06, vol:0.08}); setTimeout(()=>tone({type:'sine', freq:1400, dur:0.06, vol:0.06}), 60); }
+function sRel(){ tone({type:'square', freq:400, dur:0.06, vol:0.07}); tone({type:'square', freq:700, dur:0.06, vol:0.07}); }
+function sWaveStart(){ for(let i=0;i<3;i++) setTimeout(()=>tone({type:'square', freq:440+i*220, dur:0.12, vol:0.1}), i*120); }
+function sGameOver(){ noiseBurst({dur:0.6, vol:0.2, freq:80}); }
+function sMenuPick(){ tone({type:'sine', freq:700, dur:0.05, vol:0.06}); }
+function ambientLoop(){
+  if(!audioCtx || !audioEnabled || musicOsc) return;
+  musicOsc = audioCtx.createOscillator();
+  musicGain = audioCtx.createGain();
+  musicOsc.type = 'sine';
+  musicOsc.frequency.setValueAtTime(110, audioCtx.currentTime);
+  musicGain.gain.setValueAtTime(0.012, audioCtx.currentTime);
+  musicOsc.connect(musicGain); musicGain.connect(audioCtx.destination);
+  musicOsc.start();
+}
+
+/* ---------- утилиты ---------- */
+function rand(min,max){ return Math.random()*(max-min)+min; }
+function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
+function shakeScreen(amount){ shake = Math.max(shake, amount); }
+function hurtScreen(){ hurtFlash = 0.5; shakeScreen(5); }
+function flashScreen(){ els.flash.style.opacity = 0.25; setTimeout(()=>els.flash.style.opacity=0, 100); }
+function showMsg(text, ms=1400){
+  els.msg.textContent = text;
+  els.msg.classList.add('show');
+  setTimeout(()=>els.msg.classList.remove('show'), ms);
+}
+function showBanner(big, small, ms=2600){
+  els.bannerBig.textContent = big;
+  els.bannerSmall.textContent = small;
+  els.banner.classList.add('show');
+  setTimeout(()=>els.banner.classList.remove('show'), ms);
+}
+function setCombo(n){
+  combo = n;
+  if(combo > comboMax) comboMax = combo;
+  if(combo >= 2){
+    els.combo.style.display = 'block';
+    els.comboText.textContent = 'КОМБО ×' + combo;
+    els.comboBar.style.transform = 'scaleX(' + Math.min(1, combo/10) + ')';
+  } else {
+    els.combo.style.display = 'none';
+  }
+}
+
+/* ---------- сущности ---------- */
+function spawnBullet(x,y,angle,damage){
+  bullets.push({ x,y,angle,damage,speed:14,life:1.4,radius:2.5 });
+}
+function spawnZombie(typeKey){
+  const t = Z_TYPE[typeKey];
+  const left = Math.random() < 0.5;
+  let x = left ? -t.size - rand(0,100) : width + t.size + rand(0,100);
+  let y = rand(70, height-70);
+  const ang = Math.atan2(height/2 - y, (width-100) - x);
+  const hpMult = 1 + 0.1*wave;
+  zombies.push({
+    x,y,angle:ang, type:typeKey, typeData:t,
+    hp: t.hp*hpMult, maxHp: t.hp*hpMult,
+    speed: t.speed*(1+0.025*wave), dmg: t.dmg,
+    reward: t.reward, size: t.size, color: t.color,
+    alive: true, dying: false, dieTimer: 0,
+    hitFlash: 0, walkOffset: Math.random()*Math.PI*2,
+  });
+}
+function spawnParticle(x,y,color,count,speed,life){
+  for(let i=0;i<count;i++){
+    const ang=Math.random()*Math.PI*2, sp=Math.random()*speed;
+    particles.push({ x,y, vx:Math.cos(ang)*sp, vy:Math.sin(ang)*sp, color,
+      life: life+Math.random()*0.3, maxLife: life, size: Math.random()*3+1 });
+  }
+}
+function spawnMine(x,y){
+  mines.push({ x,y, r:15, active:true, life:25 });
+}
+function spawnTurret(x,y){
+  turrets.push({ x,y, r:11, angle:0, cooldown:0, range:160, dmg:1, firerate:1.5, life:45 });
+}
+function spawnDrop(x,y,kind){
+  drops.push({ x,y, kind, t:0, life:11, r:7, vx:(Math.random()-0.5)*2, vy:(Math.random()-0.5)*2-1 });
+}
+
+/* ---------- HUD ---------- */
+function updateHUD(){
+  const hpPct = clamp(fortHP/fortMaxHP,0,1);
+  const wallPct = clamp(wallHP/wallMaxHP,0,1);
+  els.hpFill.style.width = (hpPct*100)+'%';
+  els.hpText.textContent = Math.max(0,Math.round(fortHP)) + ' / ' + fortMaxHP;
+  els.bsFill.style.width = (wallPct*100)+'%';
+  els.bsText.textContent = Math.round(wallPct*100) + '%';
+  els.waveText.textContent = 'Волна ' + wave;
+  els.waveSub.textContent = 'живых зомби: ' + zombies.filter(z=>z.alive).length;
+  els.cashText.textContent = money;
+  els.scoreText.textContent = score;
+  if(player.reloading){
+    els.ammoText.textContent = 'перезарядка…';
+    els.ammoSub.textContent = Math.ceil(player.reloadTime) + ' сек';
+  } else {
+    els.ammoText.textContent = player.mag + ' / ' + player.magMax;
+    els.ammoSub.textContent = 'R — перезарядка';
+  }
+}
+
+/* ---------- игра ---------- */
+function attemptShoot(){
+  if(state!=='PLAY' || paused) return;
+  if(player.reloading) return;
+  if(player.mag <= 0){ startReload(); return; }
+  spawnBullet(player.x, player.y, player.angle + rand(-0.04,0.04), player.damage);
+  player.mag--;
+  sShoot(); muzzleFlash=0.14; shakeScreen(2); flashScreen();
+  updateHUD();
+  if(player.mag <= 0) startReload();
+}
+function startReload(){
+  if(player.reloading || player.mag>=player.magMax) return;
+  player.reloading = true; player.reloadTime = player.reloadMax;
+  sRel(); showMsg('Перезарядка…', 900);
+  updateHUD();
+}
+function finishReload(){
+  player.reloading=false; player.reloadTime=0; player.mag=player.magMax;
+  updateHUD();
+}
+function zombieDie(z){
+  if(!z.alive) return;
+  z.alive=false; z.dying=true; z.dieTimer=0;
+  waveZombiesLeft = Math.max(0, waveZombiesLeft-1);
+  kills++; sDie();
+  let mult=1;
+  if(combo>=3) mult+=0.25;
+  if(combo>=6) mult+=0.25;
+  const gain=Math.floor(z.reward*mult);
+  money+=gain; score+=z.reward;
+  sCoin();
+  spawnParticle(z.x,z.y,z.color,14,45,0.6);
+  if(Math.random()<0.07) spawnDrop(z.x,z.y, Math.random()<0.5?'heal':'ammo');
+  setCombo(combo+1);
+  updateHUD();
+  if(waveZombiesLeft<=0 && zombies.filter(z=>z.alive).length===0){
+    // волна окончится через паузу (обработка в updateWave)
+  }
+}
+function zombieHitWall(z){
+  if(!z.alive) return;
+  waveZombiesLeft = Math.max(0, waveZombiesLeft-1);
+  fortHP -= z.dmg;
+  wallHP -= Math.floor(z.dmg*0.4);
+  if(wallHP<0) wallHP=0;
+  sWallHit(); hurtScreen();
+  spawnParticle(width-100, height/2, '#e2453c', 10, 35, 0.5);
+  showMsg('- ' + z.dmg + ' HP форта', 900);
+  updateHUD();
+  if(fortHP<=0){ fortHP=0; gameOver(); }
+}
+
+/* ---------- волны ---------- */
+function startWave(n){
+  wave=n; waveZombiesLeft=0; wavePause=0; waveTimer=0;
+  let count = 4 + n*2 + Math.floor(Math.pow(n,1.3));
+  const bossWave = (n%5===0);
+  let normal=count, fast=0, tank=0;
+  if(n>=2){ fast=Math.floor(count*0.3); normal-=fast; }
+  if(n>=3 || bossWave){
+    tank = bossWave ? Math.floor(count*0.4) : Math.floor(count*0.2);
+    normal-=tank; fast-=Math.floor(tank*0.5); if(fast<0) fast=0;
+  }
+  if(normal<0) normal=0;
+  waveZombiesLeft = normal+fast+tank;
+  for(let i=0;i<normal;i++) spawnZombie('normal');
+  for(let i=0;i<fast;i++) spawnZombie('fast');
+  for(let i=0;i<tank;i++) spawnZombie('tank');
+  sWaveStart();
+  showBanner('ВОЛНА '+n, bossWave?'БОСС-ВОЛНА — много танков':'Держи оборону');
+  updateHUD();
+}
+function endWaveToShop(){
+  wavePause=5;
+  state='SHOP';
+  paused=true;
+  openShopUI();
+  showBanner('Перерыв', 'Магазин открыт — волна '+(wave+1)+' через 5 сек');
+}
+function updateWave(dt){
+  if(state!=='PLAY' || paused) return;
+  if(wavePause>0){
+    wavePause-=dt;
+    if(wavePause<=0){ wavePause=0; startWave(wave+1); }
+    return;
+  }
+  const alive = zombies.filter(z=>z.alive).length;
+  if(waveZombiesLeft<=0 && alive===0){
+    endWaveToShop();
+  }
+}
+
+/* ---------- магазин ---------- */
+const shopItems = [
+  { key:'repair', name:'Починить форт', cost:COST.repair, desc:'+' + REPAIR_HP + ' HP форта', hotkey:'1', buy(){
+    if(money<COST.repair) return false;
+    if(fortHP>=fortMaxHP){ showMsg('Форт уже цел'); return false; }
+    money-=COST.repair; fortHP=Math.min(fortMaxHP, fortHP+REPAIR_HP);
+    sCoin(); showMsg('Форт восстановлен +'+REPAIR_HP+' HP');
+    updateHUD(); renderShop(); return true;
+  }},
+  { key:'dmg', name:'Увеличить урон', cost:COST.dmg, desc:'+' + 1 + ' к урону пули', hotkey:'2', buy(){
+    if(money<COST.dmg) return false;
+    money-=COST.dmg; player.damage+=1;
+    sCoin(); showMsg('Урон пули: ' + player.damage);
+    updateHUD(); renderShop(); return true;
+  }},
+  { key:'mag', name:'Увеличить обойму', cost:COST.mag, desc:'+' + MAG_ADD + ' патронов', hotkey:'3', buy(){
+    if(money<COST.mag) return false;
+    money-=COST.mag; player.magMax+=MAG_ADD; player.mag+=MAG_ADD;
+    sCoin(); showMsg('Обойма: ' + player.magMax);
+    updateHUD(); renderShop(); return true;
+  }},
+  { key:'mine', name:'Мины перед фортом', cost:COST.mine, desc:'Взрыв при контакте с зомби (AoE)', hotkey:'4', buy(){
+    if(money<COST.mine) return false;
+    money-=COST.mine; sCoin();
+    spawnMine(width-130, height/2-45);
+    spawnMine(width-130, height/2+45);
+    showMsg('Мины поставлены у стены');
+    updateHUD(); renderShop(); return true;
+  }},
+  { key:'turret', name:'Турель игрока', cost:COST.turret, desc:'Автострельба по зомби', hotkey:'5', buy(){
+    if(money<COST.turret) return false;
+    money-=COST.turret; sCoin();
+    spawnTurret(width-125, height/2-55);
+    spawnTurret(width-125, height/2+55);
+    showMsg('Турели установлены');
+    updateHUD(); renderShop(); return true;
+  }},
+  { key:'wall', name:'Укрепить стену', cost:COST.wall, desc:'+' + WALL_ADD + ' прочности стены', hotkey:'6', buy(){
+    if(money<COST.wall) return false;
+    money-=COST.wall; wallMaxHP+=WALL_ADD; wallHP=wallMaxHP;
+    sCoin(); showMsg('Стена усилена (+'+WALL_ADD+' HP)');
+    updateHUD(); renderShop(); return true;
+  }},
+];
+function buyShopItem(index){
+  const it=shopItems[index]; if(!it) return;
+  if(it.buy()){ /* already re-rendered inside */ }
+  else sMenuPick();
+}
+window.buyShopItem = buyShopItem;
+function openShopUI(){
+  state='SHOP'; paused=true;
+  els.overlayShop.style.display='flex';
+  renderShop(); resumeAudio();
+}
+function closeShopUI(){
+  els.overlayShop.style.display='none';
+}
+function renderShop(){
+  els.shopGrid.innerHTML='';
+  els.shopCash.textContent='💰 '+money;
+  let html='';
+  shopItems.forEach((it,i)=>{
+    const affordable = money>=it.cost;
+    html+=`
+      <button class="shop-card" onclick="buyShopItem(${i})" ${!affordable?'disabled':''}>
+        <div class="ico">🛠</div>
+        <div class="shop-info"><b>${it.name}</b><span>${it.desc}</span></div>
+        <div class="price">$${it.cost} · ${it.hotkey}</div>
+      </button>`;
+  });
+  els.shopGrid.innerHTML=html;
+  els.shopHotkeys.innerHTML=shopItems.map((_,i)=>'<span class="hk">'+(i+1)+'</span>').join(' ');
+}
+
+/* ---------- обновление сущностей ---------- */
+function updateBullets(dt){
+  for(let i=bullets.length-1;i>=0;i--){
+    const b=bullets[i];
+    b.x+=Math.cos(b.angle)*b.speed*60*dt;
+    b.y+=Math.sin(b.angle)*b.speed*60*dt;
+    b.life-=dt;
+    // попадание в зомби
+    for(const z of zombies){
+      if(!z.alive||z.dying) continue;
+      if(dist(b,z)<b.radius+z.size){
+        z.hp-=b.damage; z.hitFlash=0.15; sHit();
+        spawnParticle(z.x,z.y,'#ff4444',5,30,0.4);
+        b.life=0;
+        if(z.hp<=0) zombieDie(z);
+        break;
+      }
+    }
+    // пуль у стены форта не наносит урона (только зомби)
+    if(b.life<=0||b.x<-50||b.x>width+50||b.y<-50||b.y>height+50) bullets.splice(i,1);
+  }
+}
+function updateZombies(dt){
+  const wallX=width-100;
+  for(let i=zombies.length-1;i>=0;i--){
+    const z=zombies[i];
+    if(!z.alive) continue;
+    if(z.dying){
+      z.dieTimer+=dt; z.size*=0.965;
+      if(z.dieTimer>0.5){ zombies.splice(i,1); }
+      continue;
+    }
+    const dx=wallX-z.x, dy=height/2-z.y, d=Math.hypot(dx,dy);
+    if(d>0){
+      const move=z.speed*60*dt;
+      z.x+=(dx/d)*move; z.y+=(dy/d)*move; z.angle=Math.atan2(dy,dx);
+      z.walkOffset+=dt*10;
+    }
+    // дошёл до стены
+    if(dist({x:z.x,y:z.y},{x:wallX,y:height/2})<z.size+20){
+      zombieHitWall(z); z.alive=false; z.dying=true; z.dieTimer=0;
+      spawnParticle(z.x,z.y,'#8a0c0c',12,35,0.6);
+      continue;
+    }
+    // мины
+    for(const m of mines){
+      if(!m.active) continue;
+      if(dist(z,m)<z.size+m.r){
+        m.active=false; spawnParticle(z.x,z.y,'#ffb23e',20,55,0.7);
+        for(const z2 of zombies){
+          if(!z2.alive||z2.dying) continue;
+          if(dist(z2,m)<75){ z2.hp-=3; if(z2.hp<=0) zombieDie(z2); }
+        }
+        if(z.hp>0) zombieDie(z);
+        break;
+      }
+    }
+  }
+}
+function updateTurrets(dt){
+  for(let i=turrets.length-1;i>=0;i--){
+    const t=turrets[i];
+    t.life-=dt; t.cooldown-=dt;
+    if(t.life<=0){ turrets.splice(i,1); continue; }
+    let target=null, bd=t.range;
+    for(const z of zombies){
+      if(!z.alive||z.dying) continue;
+      const dd=dist(z,t);
+      if(dd<bd){ bd=dd; target=z; }
+    }
+    if(target && t.cooldown<=0){
+      t.cooldown=1/t.firerate;
+      t.angle=Math.atan2(target.y-t.y, target.x-t.x);
+      spawnBullet(t.x,t.y,t.angle,t.dmg);
+    }
+  }
+}
+function updateMines(dt){
+  for(let i=mines.length-1;i>=0;i--){
+    const m=mines[i]; m.life-=dt;
+    if(m.life<=0) mines.splice(i,1);
+  }
+}
+function updateDrops(dt){
+  for(let i=drops.length-1;i>=0;i--){
+    const d=drops[i];
+    d.t+=dt; d.x+=d.vx; d.y+=d.vy; d.vy+=70*dt;
+    if(d.t>d.life){ drops.splice(i,1); continue; }
+    if(dist(d,player)<30){
+      if(d.kind==='heal'){
+        fortHP=Math.min(fortMaxHP, fortHP+15); sCoin(); showMsg('Аптечка: форт +15 HP');
+      } else {
+        player.mag=Math.min(player.magMax, player.mag+3); sCoin(); showMsg('Боевые припасы +3');
+      }
+      drops.splice(i,1); updateHUD();
+    }
+  }
+}
+function updateParticles(dt){
+  for(let i=particles.length-1;i>=0;i--){
+    const p=particles[i];
+    p.x+=p.vx; p.y+=p.vy; p.vy+=90*dt;
+    p.life-=dt; p.size*=0.94;
+    if(p.life<=0||p.size<0.2) particles.splice(i,1);
+  }
+}
+function updateCombo(dt){
+  if(combo>0){
+    comboTimer-=dt;
+    if(comboTimer<=0){ comboTimer=0; setCombo(Math.max(0,combo-1)); }
+  }
+}
+
+/* ---------- рендер ---------- */
+function drawSky(){
+  const g=ctx.createLinearGradient(0,0,0,height);
+  g.addColorStop(0,'#070a14'); g.addColorStop(0.6,'#121a2a'); g.addColorStop(1,'#182335');
+  ctx.fillStyle=g; ctx.fillRect(0,0,width,height);
+  ctx.fillStyle='#e8eef7';
+  for(let i=0;i<50;i++){
+    const x=(i*151)%width, y=(i*89)%height;
+    const a=Math.sin(i)*0.5+0.5;
+    ctx.globalAlpha=0.3+a*0.5;
+    ctx.fillRect(x,y,1.3,1.3);
+  }
+  ctx.globalAlpha=1;
+  ctx.fillStyle='#e6f0ff'; ctx.beginPath(); ctx.arc(width*0.84,height*0.17,32,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#cfdcf2'; ctx.beginPath(); ctx.arc(width*0.84-9,height*0.17-7,15,0,Math.PI*2); ctx.fill();
+}
+function drawGround(){
+  ctx.fillStyle='#0f1720'; ctx.fillRect(0,height*0.8,width,height*0.2);
+  ctx.fillStyle='#1a2430'; ctx.fillRect(0,height*0.8,width,4);
+}
+function drawFort(){
+  const fx=width-100, fy=height/2, fw=72, fh=230;
+  ctx.fillStyle='#3d322a'; ctx.fillRect(fx-fw/2, fy-fh/2, fw, fh);
+  ctx.fillStyle='#4a3d32';
+  for(let row=0;row<fh/18;row++){
+    const off=(row%2)*16;
+    for(let col=0;col<fw/18;col++){
+      ctx.strokeStyle='#2c221a'; ctx.lineWidth=1;
+      ctx.strokeRect(fx-fw/2+off+col*18, fy-fh/2+row*18, 16,16);
+    }
+  }
+  ctx.fillStyle='#3d322a';
+  for(let col=0;col<fw/18;col++) ctx.fillRect(fx-fw/2+col*18, fy-fh/2-17, 14,17);
+  // флаг
+  ctx.fillStyle='#e2453c'; ctx.fillRect(fx+fw/2-6, fy-fh/2+12, 24,16);
+  // игрок на стене
+  ctx.save(); ctx.translate(player.x, player.y); ctx.rotate(player.angle);
+  ctx.fillStyle='#2c3e50'; ctx.fillRect(-9,-15,18,28);
+  ctx.fillStyle='#e0b88c'; ctx.beginPath(); ctx.arc(0,-22,9,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#1a1a1a'; ctx.fillRect(10,-5,24,5);
+  // вспышка выстрела
+  if(muzzleFlash>0){
+    ctx.fillStyle='rgba(255,205,70,'+muzzleFlash+')';
+    ctx.beginPath(); ctx.moveTo(30,-4);
+    ctx.lineTo(30+28*Math.cos(player.angle), -4+28*Math.sin(player.angle));
+    ctx.lineTo(30+28*Math.cos(player.angle)+7, -4+28*Math.sin(player.angle)+4);
+    ctx.lineTo(30+7, 4); ctx.fill();
+    muzzleFlash-=dtGlobal*3;
+    if(muzzleFlash<0) muzzleFlash=0;
+  }
+  ctx.restore();
+}
+function drawBullets(){
+  ctx.fillStyle='#ffe04d';
+  for(const b of bullets){
+    ctx.globalAlpha=0.9;
+    ctx.beginPath(); ctx.arc(b.x,b.y,b.radius,0,Math.PI*2); ctx.fill();
+    ctx.globalAlpha=0.45;
+    ctx.beginPath(); ctx.moveTo(b.x,b.y);
+    ctx.lineTo(b.x-Math.cos(b.angle)*9, b.y-Math.sin(b.angle)*9);
+    ctx.strokeStyle='#ffe04d'; ctx.lineWidth=2; ctx.stroke();
+  }
+  ctx.globalAlpha=1;
+}
+function drawZombies(){
+  for(const z of zombies){
+    if(!z.alive&&!z.dying) continue;
+    ctx.save(); ctx.translate(z.x,z.y); ctx.rotate(z.angle);
+    const walk=Math.sin(z.walkOffset)*(z.dying?0:1.6);
+    const hpPct=z.maxHp>0?z.hp/z.maxHp:1;
+    ctx.fillStyle=z.color; ctx.globalAlpha=z.dying?0.5:1;
+    ctx.beginPath(); ctx.ellipse(walk, 2, z.size, z.size*1.1, 0, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle='#b8c4d0'; ctx.beginPath(); ctx.arc(z.size*0.9+walk, -z.size*0.6, z.size*0.55, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle='#ff2a2a'; ctx.fillRect(-2+walk*0.7, -z.size*0.75, 3,3); ctx.fillRect(2+walk*0.7, -z.size*0.75, 3,3);
+    // HP-полоска над зомби
+    ctx.fillStyle='#0004'; ctx.fillRect(-z.size-2, -z.size-11, z.size*2+4, 5);
+    ctx.fillStyle=hpPct>0.6?'#6fe39a':(hpPct>0.3?'#ffe04d':'#e2453c');
+    ctx.fillRect(-z.size, -z.size-9, (z.size*2)*hpPct, 3);
+    // вспышка попадания
+    if(z.hitFlash>0){
+      ctx.fillStyle='rgba(255,255,255,'+z.hitFlash+')';
+      ctx.beginPath(); ctx.arc(0,0,z.size*1.5,0,Math.PI*2); ctx.fill();
+      z.hitFlash-=dtGlobal*5; if(z.hitFlash<0) z.hitFlash=0;
+    }
+    ctx.restore();
+  }
+}
+function drawMines(){
+  ctx.fillStyle='#ffb23e';
+  for(const m of mines){
+    if(!m.active) continue;
+    ctx.globalAlpha=0.55+0.4*Math.sin(Date.now()/200);
+    ctx.beginPath(); ctx.arc(m.x,m.y,m.r,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle='#fff'; ctx.lineWidth=2; ctx.stroke();
+    ctx.fillStyle='#000'; ctx.font='11px sans-serif'; ctx.textAlign='center'; ctx.fillText('✕', m.x, m.y+3);
+  }
+  ctx.globalAlpha=1;
+}
+function drawTurrets(){
+  ctx.fillStyle='#4a5568';
+  for(const t of turrets){
+    ctx.save(); ctx.translate(t.x,t.y); ctx.rotate(t.angle);
+    ctx.fillRect(-8,-8,16,16);
+    ctx.fillStyle='#ffb23e'; ctx.fillRect(7,-2,11,4);
+    ctx.restore();
+    ctx.fillStyle='rgba(255,178,62,0.12)';
+    ctx.beginPath(); ctx.arc(t.x,t.y,t.range,0,Math.PI*2); ctx.fill();
+  }
+}
+function drawDrops(){
+  for(const d of drops){
+    ctx.save(); ctx.translate(d.x,d.y);
+    ctx.globalAlpha=0.85;
+    if(d.kind==='heal'){ ctx.fillStyle='#6fe39a'; ctx.beginPath(); ctx.arc(0,0,d.r,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#fff'; ctx.font='13px sans-serif'; ctx.textAlign='center'; ctx.fillText('+',0,3);
+    } else { ctx.fillStyle='#ffe04d'; ctx.beginPath(); ctx.arc(0,0,d.r,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#000'; ctx.font='11px sans-serif'; ctx.textAlign='center'; ctx.fillText('A',0,3); }
+    ctx.restore();
+  }
+}
+function drawParticles(){
+  for(const p of particles){
+    ctx.save(); ctx.globalAlpha=p.life/p.maxLife; ctx.fillStyle=p.color;
+    ctx.beginPath(); ctx.arc(p.x,p.y,p.size,0,Math.PI*2); ctx.fill(); ctx.restore();
+  }
+}
+
+/* ---------- игровой цикл ---------- */
+let animId=null, lastTime=0;
+function loop(t){
+  if(!animId) return;
+  const dt=Math.min(0.05,(t-lastTime)/1000);
+  lastTime=t; dtGlobal=dt;
+
+  if(state==='PLAY' && !paused){
+    updateWave(dt);
+    updateBullets(dt);
+    updateZombies(dt);
+    updateTurrets(dt);
+    updateMines(dt);
+    updateDrops(dt);
+    updateParticles(dt);
+    updateCombo(dt);
+    shake*=0.86; if(shake<0.25) shake=0;
+    hurtFlash=Math.max(0,hurtFlash-dt);
+    els.hurt.style.opacity=hurtFlash;
+    updateHUD();
+  }
+
+  ctx.save();
+  if(shake>0) ctx.translate(rand(-shake,shake), rand(-shake,shake));
+  drawSky(); drawGround(); drawFort();
+  drawTurrets(); drawMines(); drawDrops(); drawBullets(); drawZombies(); drawParticles();
+  ctx.restore();
+
+  animId=requestAnimationFrame(loop);
+}
+function resize(){
+  width=canvas.width=canvas.clientWidth;
+  height=canvas.height=canvas.clientHeight;
+  player.x=width-110; player.y=height/2;
+}
+window.addEventListener('resize',resize);
+
+/* ---------- ввод ---------- */
+window.addEventListener('mousemove',e=>{
+  const r=canvas.getBoundingClientRect();
+  mouse.x=e.clientX-r.left; mouse.y=e.clientY-r.top;
+  if(state==='PLAY'&&!paused) player.angle=Math.atan2(mouse.y-player.y, mouse.x-player.x);
+});
+window.addEventListener('mousedown',e=>{ if(e.button!==0) return; mouse.down=true;
+  if(state==='PLAY'&&!paused) attemptShoot(); });
+window.addEventListener('mouseup',e=>{ if(e.button===0) mouse.down=false; });
+window.addEventListener('keydown',e=>{
+  keys[e.code]=true;
+  if(state==='PLAY'&&!paused){
+    if(e.code==='KeyR') startReload();
+    if(e.code==='Escape') togglePause();
+    if(e.code==='Digit1') buyShopItem(0);
+    if(e.code==='Digit2') buyShopItem(1);
+    if(e.code==='Digit3') buyShopItem(2);
+    if(e.code==='Digit4') buyShopItem(3);
+    if(e.code==='Digit5') buyShopItem(4);
+    if(e.code==='Digit6') buyShopItem(5);
+  }
+  if((e.code==='Escape'||e.code==='KeyP')&&state==='PLAY'&&!paused) togglePause();
+  if(e.code==='Escape'&&state==='PAUSE') closePause();
+});
+window.addEventListener('keyup',e=>{ keys[e.code]=false; });
+canvas.addEventListener('contextmenu',e=>e.preventDefault());
+
+function togglePause(){ paused=!paused;
+  if(paused){ state='PAUSE'; els.overlayPause.style.display='flex'; }
+  else { state='PLAY'; els.overlayPause.style.display='none'; }
+}
+function closePause(){ paused=false; state='PLAY'; els.overlayPause.style.display='none'; }
+
+function gameOver(){
+  state='GAMEOVER'; paused=true;
+  sGameOver();
+  els.overlayGo.style.display='flex';
+  els.goStats.innerHTML='Ты продержался <b>'+wave+' волн</b> · убито зомби <b>'+kills+'</b> · заработано <b>'+money+' монет</b>';
+  els.hud.style.display='none'; els.cross.style.display='none';
+}
+function startGame(){
+  money=0; score=0; kills=0; wave=0;
+  fortHP=100; fortMaxHP=100; wallHP=100; wallMaxHP=100;
+  player.damage=1; player.mag=10; player.magMax=10;
+  player.reloading=false; player.reloadTime=0;
+  combo=0; comboTimer=0; setCombo(0);
+  bullets=[]; zombies=[]; particles=[]; mines=[]; turrets=[]; drops=[];
+  shake=0; hurtFlash=0; muzzleFlash=0;
+  resize();
+  state='PLAY'; paused=false;
+  els.overlayMenu.style.display='none';
+  els.overlayHow.style.display='none';
+  els.overlayShop.style.display='none';
+  els.overlayPause.style.display='none';
+  els.overlayGo.style.display='none';
+  els.hud.style.display='flex'; els.cross.style.display='block';
+  resumeAudio(); initAudio(); ambientLoop();
+  startWave(1);
+  lastTime=performance.now();
+  if(!animId) animId=requestAnimationFrame(loop);
+}
+
+/* ---------- UI ---------- */
+els.btnPlay.onclick=()=>{ sMenuPick(); startGame(); };
+els.btnHow.onclick=()=>{ sMenuPick(); els.overlayMenu.style.display='none'; els.overlayHow.style.display='flex'; };
+els.btnBack.onclick=()=>{ sMenuPick(); els.overlayHow.style.display='none'; els.overlayMenu.style.display='flex'; };
+els.shopNext.onclick=()=>{ sMenuPick(); closeShopUI(); state='PLAY'; paused=false; startWave(wave+1); };
+els.btnResume.onclick=closePause;
+els.btnRestart.onclick=()=>{ sMenuPick(); startGame(); };
+els.btnGoAgain.onclick=()=>{ sMenuPick(); startGame(); };
+
+resize();
+els.cross.style.display='none';
+initAudio();
+</script>
+</body>
+</html>
